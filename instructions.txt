@@ -1,0 +1,35 @@
+# Sauvegardez votre App.js si il existe
+cp src/App.js ~/App_backup.js 2>/dev/null; echo "ok"
+
+# Supprimez tout sauf .git
+rm -rf node_modules package-lock.json package.json src public
+
+# Recréez le projet React dans le dossier courant
+npx create-react-app@latest .
+
+
+
+# Vérifiez que react-scripts fonctionne
+npm start
+
+
+# Corrigez index.js
+cat > src/index.js << 'EOF'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+EOF
+
+# Installez gh-pages
+npm install --save-dev gh-pages
+
+# Ajoutez homepage et scripts deploy dans package.json
+npm pkg set homepage="https://marcoprofparis.github.io/couleur"
+npm pkg set scripts.predeploy="npm run build"
+npm pkg set scripts.deploy="gh-pages -d build"
+
+# Déployez
+npm run deploy
