@@ -197,6 +197,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   const drag      = useRef(null);
   const didMove   = useRef(false);
   const lastWh    = useRef(0);
+  const pinch     = useRef(null);   // { dist0, zoom0 } for pinch-to-zoom
   // pan offset in LAB units (how much the view center is shifted)
   const [pan, setPan] = useState({ a: 0, b: 0 });
 
@@ -598,6 +599,8 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   useEffect(() => { panRef.current = pan; }, [pan]);
 
   const onMouseDown = useCallback((e) => {
+    // ignore multi-touch (pinch handled separately)
+    if (e.touches && e.touches.length >= 2) return;
     didMove.current = false;
     const { x, y } = getPos(e);
     const hit = hitTest(x, y);
@@ -613,6 +616,8 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
 
   const onMouseMove = useCallback((e) => {
     if (!drag.current) return;
+    // cancel drag if pinching
+    if (e.touches && e.touches.length >= 2) { drag.current = null; return; }
     didMove.current = true;
     const { x, y } = getPos(e);
 
@@ -678,11 +683,55 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     });
   }, [setZoom]);
 
+  // ── Pinch-to-zoom ────────────────────────────────────────────────────────────
+  const ZOOM_STEPS_P = [1, 1.5, 2, 3, 4, 6, 7];
+
+  const onTouchStartPinch = useCallback((e) => {
+    if (e.touches.length === 2) {
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      pinch.current = { dist0: d, zoom0: zoom };
+      e.preventDefault();
+    }
+  }, [zoom]);
+
+  const onTouchMovePinch = useCallback((e) => {
+    if (e.touches.length === 2 && pinch.current) {
+      e.preventDefault();
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      const ratio = d / pinch.current.dist0;
+      const target = pinch.current.zoom0 * ratio;
+      // snap to nearest step
+      let best = 0;
+      for (let i = 1; i < ZOOM_STEPS_P.length; i++) {
+        if (Math.abs(ZOOM_STEPS_P[i] - target) < Math.abs(ZOOM_STEPS_P[best] - target)) best = i;
+      }
+      setZoom(ZOOM_STEPS_P[best]);
+    }
+  }, [setZoom]);
+
+  const onTouchEndPinch = useCallback(() => {
+    pinch.current = null;
+  }, []);
+
   useEffect(() => {
     const el = ovRef.current; if (!el) return;
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [onWheel]);
+    el.addEventListener("touchstart", onTouchStartPinch, { passive: false });
+    el.addEventListener("touchmove", onTouchMovePinch, { passive: false });
+    el.addEventListener("touchend", onTouchEndPinch);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStartPinch);
+      el.removeEventListener("touchmove", onTouchMovePinch);
+      el.removeEventListener("touchend", onTouchEndPinch);
+    };
+  }, [onWheel, onTouchStartPinch, onTouchMovePinch, onTouchEndPinch]);
 
   useEffect(() => {
     window.addEventListener("mousemove", onMouseMove);
