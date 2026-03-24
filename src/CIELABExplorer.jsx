@@ -595,11 +595,37 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     Math.hypot(px - CX, py - CY) <= SIZE / 2 - 2, []);
 
   const panRef = useRef({ a: 0, b: 0 });
-  // keep panRef in sync so mousedown can read current pan without stale closure
   useEffect(() => { panRef.current = pan; }, [pan]);
 
+  // ── Popup / hint state ────────────────────────────────────────────────────
+  const [selectedIdx, setSelectedIdx] = useState(null);   // index of point with open popup
+  const [hint, setHint] = useState(null);                  // { x, y } canvas-pixel position of hint
+  const hintTimer = useRef(null);
+  const lastTap = useRef(0);                               // for double-tap detection
+
+  // clear hint after delay
+  useEffect(() => {
+    if (!hint) return;
+    const t = setTimeout(() => setHint(null), 1800);
+    return () => clearTimeout(t);
+  }, [hint]);
+
+  // close popup when clicking outside the disc
+  const popupRef = useRef(null);
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const handler = (e) => {
+      if (popupRef.current && popupRef.current.contains(e.target)) return;
+      // if click is on the canvas, onMouseUp handles it
+      if (ovRef.current && ovRef.current.contains(e.target)) return;
+      setSelectedIdx(null);
+    };
+    window.addEventListener("mousedown", handler);
+    window.addEventListener("touchstart", handler);
+    return () => { window.removeEventListener("mousedown", handler); window.removeEventListener("touchstart", handler); };
+  }, [selectedIdx]);
+
   const onMouseDown = useCallback((e) => {
-    // ignore multi-touch (pinch handled separately)
     if (e.touches && e.touches.length >= 2) return;
     didMove.current = false;
     const { x, y } = getPos(e);
@@ -607,7 +633,6 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     if (hit >= 0) {
       drag.current = { kind: "point", idx: hit };
     } else if (inDisc(x, y)) {
-      // snapshot current pan at drag start
       drag.current = { kind: "pan", startX: x, startY: y,
         basePanA: panRef.current.a, basePanB: panRef.current.b };
     }
@@ -616,11 +641,9 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
 
   const onMouseMove = useCallback((e) => {
     if (!drag.current) return;
-    // cancel drag if pinching
     if (e.touches && e.touches.length >= 2) { drag.current = null; return; }
     didMove.current = true;
     const { x, y } = getPos(e);
-
     if (drag.current.kind === "point") {
       const [a, b] = p2l(x, y);
       const [ca, cb] = clampPt(a, b);
@@ -629,14 +652,12 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       const dpx = x - drag.current.startX;
       const dpy = y - drag.current.startY;
       const { da, db } = dp2dl(dpx, dpy);
-      // pan = snapshot − pixel delta (drag right → content moves right → origin shifts left)
       setPan({ a: drag.current.basePanA - da, b: drag.current.basePanB - db });
     }
     e.preventDefault();
   }, [getPos, p2l, dp2dl, setPoints]);
 
   const onMouseUp = useCallback((e) => {
-    const kind    = drag.current?.kind;
     const wasDrag = drag.current !== null && didMove.current;
     drag.current  = null;
     if (wasDrag) { didMove.current = false; return; }
@@ -647,27 +668,54 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     const src = e.changedTouches ? e.changedTouches[0] : e;
     const px = (src.clientX - rect.left) * sc;
     const py = (src.clientY - rect.top) * sc;
-
     const hit = hitTest(px, py);
 
+    // Double-tap detection for touch
+    const now = Date.now();
+    const isDoubleClick = e.type === "dblclick";
+    const isDoubleTap = e.changedTouches && (now - lastTap.current < 350);
+    lastTap.current = now;
+
     if (hit >= 0) {
-      if (e.button === 2 || e.shiftKey || e.ctrlKey) {
-        setPoints(pts => pts.filter((_, i) => i !== hit));
+      // single click/tap on a point → open popup
+      setSelectedIdx(hit);
+      setHint(null);
+    } else if (inDisc(px, py)) {
+      setSelectedIdx(null);
+      if (isDoubleClick || isDoubleTap) {
+        // double-click/tap → create point
+        if (points.length >= 8) return;
+        const [a, b] = p2l(px, py);
+        const [ca, cb] = clampPt(a, b);
+        setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
+        setHint(null);
+      } else if (!e.changedTouches) {
+        // single mouse click on empty → show hint (not on touch, handled via doubleTap timeout)
+        setHint({ x: px, y: py });
+      } else {
+        // single touch on empty → show hint
+        setHint({ x: px, y: py });
       }
-    } else if (inDisc(px, py) && e.button !== 2 && !e.shiftKey && !e.ctrlKey) {
-      if (points.length >= 8) return;
-      const [a, b] = p2l(px, py);
-      const [ca, cb] = clampPt(a, b);
-      setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
+    } else {
+      setSelectedIdx(null);
     }
   }, [hitTest, inDisc, p2l, setPoints, points.length, Lval]);
 
-  const onContextMenu = useCallback((e) => {
-    e.preventDefault();
+  const onDblClick = useCallback((e) => {
     const { x, y } = getPos(e);
     const hit = hitTest(x, y);
-    if (hit >= 0) setPoints(pts => pts.filter((_, i) => i !== hit));
-  }, [getPos, hitTest, setPoints]);
+    if (hit >= 0) return; // point click handled by single click
+    if (!inDisc(x, y)) return;
+    if (points.length >= 8) return;
+    const [a, b] = p2l(x, y);
+    const [ca, cb] = clampPt(a, b);
+    setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
+    setHint(null);
+  }, [getPos, hitTest, inDisc, p2l, setPoints, points.length, Lval]);
+
+  const onContextMenu = useCallback((e) => {
+    e.preventDefault();
+  }, []);
 
   // ── Wheel zoom ─────────────────────────────────────────────────────────────
   const onWheel = useCallback((e) => {
@@ -865,7 +913,159 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         onMouseDown={onMouseDown}
         onTouchStart={onMouseDown}
         onMouseMove={onHover}
+        onDoubleClick={onDblClick}
         onContextMenu={onContextMenu} />
+
+      {/* Hint: "double-cliquer pour créer un point" */}
+      {hint && (() => {
+        const el = ovRef.current;
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        const scale = rect.width / SIZE;
+        const hx = hint.x * scale;
+        const hy = hint.y * scale;
+        return (
+          <div style={{
+            position: "absolute", left: hx, top: hy - 32,
+            transform: "translateX(-50%)", pointerEvents: "none",
+            background: "rgba(0,0,0,0.7)", color: "#fff",
+            fontSize: 10, fontWeight: 600, padding: "4px 10px",
+            borderRadius: 6, whiteSpace: "nowrap", zIndex: 20,
+            backdropFilter: "blur(4px)",
+          }}>
+            Double-cliquer pour créer un point
+          </div>
+        );
+      })()}
+
+      {/* Point edit popup */}
+      {selectedIdx !== null && selectedIdx < points.length && (() => {
+        const pt = points[selectedIdx];
+        const el = ovRef.current;
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        const scale = rect.width / SIZE;
+        const { x: cpx, y: cpy } = l2p(pt.a, pt.b);
+        const px = cpx * scale;
+        const py = cpy * scale;
+        const col = PCOLS[selectedIdx % PCOLS.length];
+        const C = Math.sqrt(pt.a * pt.a + pt.b * pt.b);
+        const hDeg = ((Math.atan2(pt.b, pt.a) * 180 / Math.PI) + 360) % 360;
+        const updatePt = (patch) => setPoints(pts => pts.map((p, i) => i === selectedIdx ? { ...p, ...patch } : p));
+        const setFromCH = (newC, newH) => {
+          const rad = newH * Math.PI / 180;
+          updatePt({ a: Math.round(newC * Math.cos(rad)), b: Math.round(newC * Math.sin(rad)) });
+        };
+
+        return (
+          <div ref={popupRef} style={{
+            position: "absolute",
+            left: Math.min(Math.max(px, 130), rect.width - 130),
+            top: Math.max(py - 16, 0),
+            transform: "translate(-50%, -100%)",
+            background: "var(--color-background-primary, #fff)",
+            border: `1.5px solid ${col}`,
+            borderRadius: 12, padding: "12px 14px", zIndex: 30,
+            boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
+            minWidth: 230, maxWidth: 260,
+          }}
+            onMouseDown={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+          >
+            {/* Header: swatch + name + close */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                background: labToHex(pt.L, pt.a, pt.b),
+                border: `2px solid ${col}`,
+              }} />
+              <input
+                value={pt.name || ""}
+                placeholder={`Point ${PLBLS[selectedIdx]}`}
+                onChange={e => updatePt({ name: e.target.value })}
+                style={{
+                  flex: 1, fontSize: 12, fontWeight: 700, color: col,
+                  border: "none", borderBottom: `1px solid var(--color-border-secondary, #ddd)`,
+                  background: "transparent", outline: "none", padding: "2px 0",
+                  minWidth: 0,
+                }}
+              />
+              <button onClick={() => setSelectedIdx(null)} style={{
+                border: "none", background: "transparent", cursor: "pointer",
+                fontSize: 16, color: "var(--color-text-secondary, #999)", padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+
+            {/* Hex display */}
+            <div style={{ fontSize: 9, fontFamily: "monospace", color: "var(--color-text-secondary)", marginBottom: 8, textAlign: "center" }}>
+              {labToHex(pt.L, pt.a, pt.b).toUpperCase()}
+            </div>
+
+            {/* L* slider */}
+            <div style={{ marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#888", minWidth: 16 }}>L*</span>
+                <input type="range" min={0} max={100} step={1} value={pt.L}
+                  onChange={e => updatePt({ L: +e.target.value })}
+                  style={{ flex: 1, height: 3, accentColor: "#888", cursor: "pointer" }} />
+                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{pt.L}</span>
+              </div>
+            </div>
+            {/* a* slider */}
+            <div style={{ marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#c0392b", minWidth: 16 }}>a*</span>
+                <input type="range" min={-100} max={100} step={1} value={Math.round(pt.a)}
+                  onChange={e => updatePt({ a: +e.target.value })}
+                  style={{ flex: 1, height: 3, accentColor: "#c0392b", cursor: "pointer" }} />
+                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(pt.a)}</span>
+              </div>
+            </div>
+            {/* b* slider */}
+            <div style={{ marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#e6ac00", minWidth: 16 }}>b*</span>
+                <input type="range" min={-100} max={100} step={1} value={Math.round(pt.b)}
+                  onChange={e => updatePt({ b: +e.target.value })}
+                  style={{ flex: 1, height: 3, accentColor: "#e6ac00", cursor: "pointer" }} />
+                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(pt.b)}</span>
+              </div>
+            </div>
+            {/* C* slider */}
+            <div style={{ marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#1D9E75", minWidth: 16 }}>C*</span>
+                <input type="range" min={0} max={141} step={1} value={Math.round(C)}
+                  onChange={e => setFromCH(+e.target.value, hDeg)}
+                  style={{ flex: 1, height: 3, accentColor: "#1D9E75", cursor: "pointer" }} />
+                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(C)}</span>
+              </div>
+            </div>
+            {/* h° slider */}
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#185FA5", minWidth: 16 }}>h°</span>
+                <input type="range" min={0} max={360} step={1} value={Math.round(hDeg)}
+                  onChange={e => setFromCH(C, +e.target.value)}
+                  style={{ flex: 1, height: 3, accentColor: "#185FA5", cursor: "pointer" }} />
+                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(hDeg)}°</span>
+              </div>
+            </div>
+
+            {/* Delete button */}
+            <button
+              onClick={() => { setPoints(pts => pts.filter((_, i) => i !== selectedIdx)); setSelectedIdx(null); }}
+              style={{
+                width: "100%", padding: "5px 0", border: "1px solid #e74c3c",
+                borderRadius: 7, background: "rgba(231,76,60,0.08)", color: "#e74c3c",
+                fontSize: 10, fontWeight: 700, cursor: "pointer",
+              }}>
+              Supprimer ce point
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Reset pan button */}
       {(pan.a !== 0 || pan.b !== 0) && (
         <button
