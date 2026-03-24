@@ -1,10 +1,10 @@
 {
   "files": {
-    "main.js": "/couleur/static/js/main.7ea1c235.js",
+    "main.js": "/couleur/static/js/main.cd158ffb.js",
     "index.html": "/couleur/index.html",
-    "main.7ea1c235.js.map": "/couleur/static/js/main.7ea1c235.js.map"
+    "main.cd158ffb.js.map": "/couleur/static/js/main.cd158ffb.js.map"
   },
   "entrypoints": [
-    "static/js/main.7ea1c235.js"
+    "static/js/main.cd158ffb.js"
   ]
 }
