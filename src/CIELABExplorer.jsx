@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { ZoomIn, ZoomOut, Download, Eye, EyeOff, Grid3x3, PanelRightClose, PanelRightOpen, RotateCcw, ChevronDown } from "lucide-react";
+import { ZoomIn, ZoomOut, Download, Eye, EyeOff, Grid3x3, RotateCcw, ChevronDown } from "lucide-react";
 
 // ─── Custom Tabs (shadcn-style) ───────────────────────────────────────────────
 function Tabs({ value, onValueChange, children, className, style }) {
@@ -126,6 +126,7 @@ const CSS_VARS = `
     box-shadow: 0 1px 3px 0 rgba(0,0,0,0.08); transition: background 0.15s;
   }
   .cielab-export-btn:hover { background: #f4f4f5; }
+  @keyframes fadein { from { opacity: 0; transform: translateX(-50%) translateY(4px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 `;
 
 function CSSInjector() {
@@ -189,10 +190,223 @@ const SIZE   = 520;
 const CX     = SIZE / 2, CY = SIZE / 2;
 const ARANGE = 100; // axis always ±100
 
+// ─── Stepper button with hover tooltip ───────────────────────────────────────
+function HintBtn({ children, onClick, style, hint, hintColor }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      {show && (
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 4px)", left: "50%",
+          transform: "translateX(-50%)",
+          background: hintColor, color: "#fff",
+          fontSize: 8, fontWeight: 700, padding: "2px 5px",
+          borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 200,
+        }}>{hint}</div>
+      )}
+      <button style={style} onClick={onClick}
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}>
+        {children}
+      </button>
+    </div>
+  );
+}
+
+// ─── Point popup ─────────────────────────────────────────────────────────────
+function PointPopup({ point, idx, allPoints, pairA, pairB, showDelta, onClose, onDelete, onChange, initialX, initialY }) {
+  const C = Math.sqrt(point.a ** 2 + point.b ** 2);
+  const h = (((Math.atan2(point.b, point.a) * 180 / Math.PI) + 360) % 360);
+
+  const isStandard    = point.id === pairA;
+  const isEchantillon = point.id === pairB;
+  const otherPoint    = isStandard    ? allPoints?.find(p => p.id === pairB)
+                      : isEchantillon ? allPoints?.find(p => p.id === pairA)
+                      : null;
+  const de     = otherPoint ? dE(point.L, point.a, point.b, otherPoint.L, otherPoint.a, otherPoint.b) : null;
+  const deInfo = de !== null ? interpDE(de) : null;
+
+  const popupRef = useRef(null);
+
+  // Fixed position on screen — starts at initialX/Y, user can drag
+  const [pos, setPos] = useState({ x: initialX ?? window.innerWidth / 2 - 140, y: initialY ?? window.innerHeight - 200 });
+  const dragState = useRef(null);
+
+  useEffect(() => {
+    // Update position if initialX/Y change (new popup opened)
+    if (initialX != null && initialY != null) {
+      setPos({ x: initialX, y: initialY });
+    }
+  }, [initialX, initialY]);
+
+  const onDragStart = (e) => {
+    if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT") return;
+    dragState.current = { startMouseX: e.clientX, startMouseY: e.clientY, startPosX: pos.x, startPosY: pos.y };
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragState.current) return;
+      setPos({
+        x: dragState.current.startPosX + e.clientX - dragState.current.startMouseX,
+        y: dragState.current.startPosY + e.clientY - dragState.current.startMouseY,
+      });
+    };
+    const onUp = () => { dragState.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const hex = labToHex(point.L, point.a, point.b);
+  const PW = 280;
+
+  return (
+    <div ref={popupRef} data-popup={`pt-${idx}`} style={{
+      position: "fixed",
+      left: pos.x,
+      top: pos.y,
+      width: PW,
+      background: "rgba(255,255,255,0.97)",
+      border: "1px solid rgba(0,0,0,0.12)",
+      borderRadius: 12,
+      boxShadow: "0 8px 28px rgba(0,0,0,0.22)",
+      padding: "8px 10px 9px",
+      zIndex: 9999,
+      backdropFilter: "blur(8px)",
+      fontSize: 11,
+    }}>
+
+      {/* Header row: swatch + name + badge + drag zone + close */}
+      <div onMouseDown={onDragStart} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, cursor: "grab", userSelect: "none" }}>
+        <div style={{ width: 16, height: 16, borderRadius: 4, background: hex, border: "1.5px solid rgba(0,0,0,0.15)", flexShrink: 0 }} />
+        <input
+          value={point.name || ""}
+          placeholder={`Point ${idx + 1}`}
+          onChange={e => onChange({ ...point, name: e.target.value })}
+          onMouseDown={e => e.stopPropagation()}
+          style={{ flex: 1, fontSize: 10, fontWeight: 600, border: "none", background: "transparent", outline: "none", color: "var(--color-text-primary)", minWidth: 0, cursor: "text" }}
+        />
+        {(isStandard || isEchantillon) && showDelta && (
+          <span style={{
+            fontSize: 7, fontWeight: 800, padding: "1px 4px", borderRadius: 3, flexShrink: 0,
+            background: isStandard ? "rgba(24,95,165,0.12)" : "rgba(30,158,117,0.12)",
+            color: isStandard ? "#185FA5" : "#1D9E75",
+            border: `0.5px solid ${isStandard ? "#185FA5" : "#1D9E75"}44`,
+          }}>
+            {isStandard ? "STD" : "ÉCH"}
+          </span>
+        )}
+        {/* Drag handle zone */}
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 2, opacity: 0.3, cursor: "grab" }}>
+          {[0,1].map(i => (
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {[0,1,2].map(j => <div key={j} style={{ width: 3, height: 3, borderRadius: "50%", background: "#555" }} />)}
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} onMouseDown={e => e.stopPropagation()} style={{
+          width: 15, height: 15, borderRadius: "50%", border: "none",
+          background: "rgba(0,0,0,0.08)", color: "#666", cursor: "pointer",
+          fontSize: 10, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0, padding: 0,
+        }}>×</button>
+      </div>
+
+      {/* Steppers row: L* a* b* in a single horizontal line */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 5, alignItems: "center" }}>
+        {[
+          { label: "L*", color: "#888",    value: point.L, min: 0,    max: 100,
+            minHint: "+ Sombre", minHintColor: "#555", maxHint: "+ Clair", maxHintColor: "#aaa",
+            onSet: v => onChange({ ...point, L: Math.round(v * 10) / 10 }) },
+          { label: "a*", color: "#c0392b", value: point.a, min: -100, max: 100,
+            minHint: "+ Vert", minHintColor: "#1a7a1a", maxHint: "+ Rouge", maxHintColor: "#c0392b",
+            onSet: v => onChange({ ...point, a: Math.round(v * 10) / 10 }) },
+          { label: "b*", color: "#e6ac00", value: point.b, min: -100, max: 100,
+            minHint: "+ Bleu", minHintColor: "#185FA5", maxHint: "+ Jaune", maxHintColor: "#b8860b",
+            onSet: v => onChange({ ...point, b: Math.round(v * 10) / 10 }) },
+        ].map(({ label, color, value, min, max, minHint, minHintColor, maxHint, maxHintColor, onSet }) => {
+          const stepBtn = { width: 18, height: 18, borderRadius: 4, border: `1px solid ${color}33`, background: `${color}11`, color, cursor: "pointer", fontSize: 13, fontWeight: 700, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0, userSelect: "none" };
+          return (
+            <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+              <span style={{ fontSize: 7, fontWeight: 700, color }}>{label}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <HintBtn style={stepBtn} hint={minHint} hintColor={minHintColor || color}
+                  onClick={() => onSet(Math.max(min, Math.round((value - 0.1) * 10) / 10))}>−</HintBtn>
+                <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "monospace", color, minWidth: 32, textAlign: "center" }}>{(Math.round(value * 10) / 10).toFixed(1)}</span>
+                <HintBtn style={stepBtn} hint={maxHint} hintColor={maxHintColor || color}
+                  onClick={() => onSet(Math.min(max, Math.round((value + 0.1) * 10) / 10))}>+</HintBtn>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* C* h° + ΔE row */}
+      <div style={{ display: "flex", gap: 5, marginBottom: 6 }}>
+        {/* C* and h° badges */}
+        {[["C*", C.toFixed(1), "#1D9E75"], ["h°", h.toFixed(1) + "°", "#185FA5"]].map(([label, value, color]) => (
+          <div key={label} style={{ flex: 1, background: "var(--color-background-secondary)", borderRadius: 5, padding: "3px 5px", textAlign: "center" }}>
+            <div style={{ fontSize: 7, color: "var(--color-text-secondary)" }}>{label}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", color }}>{value}</div>
+          </div>
+        ))}
+        {/* ΔE inline if applicable */}
+        {showDelta && de !== null && otherPoint && (
+          <div style={{
+            flex: 2, padding: "3px 6px", borderRadius: 5,
+            background: `${deInfo.color}10`, border: `0.5px solid ${deInfo.color}44`,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+          }}>
+            <div>
+              <div style={{ fontSize: 7, fontWeight: 700, color: "var(--color-text-secondary)" }}>ΔE*₇₆ {isStandard ? "→ Éch." : "→ Std."}</div>
+              <div style={{ fontSize: 7, color: "var(--color-text-secondary)" }}>{otherPoint.name || `Pt ${allPoints.indexOf(otherPoint) + 1}`}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: deInfo.color, lineHeight: 1 }}>{de.toFixed(2)}</div>
+              <div style={{ fontSize: 7, color: deInfo.color, fontWeight: 600 }}>{deInfo.label}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Delete with confirm */}
+      {confirmDelete ? (
+        <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+          <span style={{ fontSize: 9, color: "#c0392b", fontWeight: 600, flex: 1 }}>Supprimer ce point ?</span>
+          <button onClick={e => { e.stopPropagation(); setConfirmDelete(false); }} style={{
+            padding: "3px 10px", cursor: "pointer", borderRadius: 5, border: "1px solid #e4e4e7",
+            background: "#f4f4f5", color: "#555", fontSize: 9, fontWeight: 700,
+          }}>Non</button>
+          <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{
+            padding: "3px 10px", cursor: "pointer", borderRadius: 5, border: "1px solid rgba(220,50,40,0.4)",
+            background: "#c0392b", color: "#fff", fontSize: 9, fontWeight: 700,
+          }}>Oui</button>
+        </div>
+      ) : (
+        <button onClick={e => { e.stopPropagation(); setConfirmDelete(true); }} style={{
+          width: "100%", padding: "3px 0", cursor: "pointer",
+          border: "1px solid rgba(220,50,40,0.25)", borderRadius: 5,
+          background: "rgba(220,50,40,0.05)", color: "#c0392b",
+          fontSize: 9, fontWeight: 700, letterSpacing: ".04em",
+        }}>
+          🗑 Supprimer
+        </button>
+      )}
+    </div>
+  );
+
+
+}
+
 // ─── Disc canvas ─────────────────────────────────────────────────────────────
-function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval, coordMode, exportRef, pairLine = null }) {
+function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval, coordMode, exportRef, pairLine = null, pairA = null, pairB = null, showDelta = false }) {
   const colRef    = useRef(null);
   const ovRef     = useRef(null);
+  const discContainerRef = useRef(null);
   // drag state: { kind: "point"|"pan", idx?, startPx, startPy, startPanA, startPanB }
   const drag      = useRef(null);
   const didMove   = useRef(false);
@@ -200,6 +414,23 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   const pinch     = useRef(null);   // { dist0, zoom0 } for pinch-to-zoom
   // pan offset in LAB units (how much the view center is shifted)
   const [pan, setPan] = useState({ a: 0, b: 0 });
+  // popup state: null | { idx }
+  const [popup, setPopup] = useState(null);
+  // hover hint: null | { x, y, kind: "point"|"empty", idx? }
+  const [hoverHint, setHoverHint] = useState(null);
+  // track dragging for hint visibility
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Close popup when clicking anywhere outside it
+  useEffect(() => {
+    if (popup === null) return;
+    const handler = (e) => {
+      if (!e.target.closest('[data-popup]')) setPopup(null);
+    };
+    // delay so the same click that opened it doesn't close it
+    const tid = setTimeout(() => document.addEventListener("pointerdown", handler), 100);
+    return () => { clearTimeout(tid); document.removeEventListener("pointerdown", handler); };
+  }, [popup]);
 
   const visRange = ARANGE / zoom; // LAB units visible from center to edge
 
@@ -473,14 +704,19 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
           ctx.stroke();
         }
 
-        // C* value label — at top of outermost circle, outside
-        const cLblX = origX;
-        const cLblY = origY - cPx - 5;
-        ctx.font = "900 12px sans-serif";
-        ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-        ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 4; ctx.lineJoin = "round";
+        // C* label: tangent to the circle, perpendicular to the radius direction
+        // Place it 90° rotated from the point direction, at circle edge, offset outward
+        const perpAngle = hRad + Math.PI / 2; // 90° from radius
+        // Position: on the circle edge, then push outward by 12px, also shift 24px along perp
+        const cEdgeX = origX + Math.cos(hRad) * cPx;
+        const cEdgeY = origY - Math.sin(hRad) * cPx;
+        const cLblX = cEdgeX + Math.cos(perpAngle) * 32 + Math.cos(hRad) * (-6);
+        const cLblY = cEdgeY - Math.sin(perpAngle) * 32 - Math.sin(hRad) * (-6);
+        ctx.font = "600 9px sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 3; ctx.lineJoin = "round";
         ctx.strokeText(`C*=${C.toFixed(1)}`, cLblX, cLblY);
-        ctx.fillStyle = "rgba(0,0,0,0.90)";
+        ctx.fillStyle = "rgba(30,158,117,0.95)";
         ctx.fillText(`C*=${C.toFixed(1)}`, cLblX, cLblY);
 
         // ── Radius line from origin to point ────────────────────────────────
@@ -524,17 +760,16 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         ctx.lineWidth = 1.8;
         ctx.stroke();
 
-        // h° label at midpoint of arc, pushed outward
-        const midAngle = canvasAngle / 2;
-        const lblDist  = arcR + 16;
-        const hLblX    = origX + Math.cos(midAngle) * lblDist;
-        const hLblY    = origY + Math.sin(midAngle) * lblDist;
-        ctx.font = "900 12px sans-serif";
+        // h° label: along the dashed radius line, at ~60% from origin toward point, offset slightly sideways
+        const hLblFrac = 0.60; // 60% of the way from origin to point
+        const hLblX = origX + Math.cos(hRad) * cPx * hLblFrac + Math.cos(hRad + Math.PI / 2) * 10;
+        const hLblY = origY - Math.sin(hRad) * cPx * hLblFrac - Math.sin(hRad + Math.PI / 2) * (-10);
+        ctx.font = "600 9px sans-serif";
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 4; ctx.lineJoin = "round";
-        ctx.strokeText(`${Math.round(hDeg)}°`, hLblX, hLblY);
-        ctx.fillStyle = "rgba(0,0,0,0.90)";
-        ctx.fillText(`${Math.round(hDeg)}°`, hLblX, hLblY);
+        ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 3; ctx.lineJoin = "round";
+        ctx.strokeText(`${hDeg.toFixed(1)}°`, hLblX, hLblY);
+        ctx.fillStyle = "rgba(24,95,165,0.95)";
+        ctx.fillText(`${hDeg.toFixed(1)}°`, hLblX, hLblY);
       });
 
     } else {
@@ -595,29 +830,16 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     Math.hypot(px - CX, py - CY) <= SIZE / 2 - 2, []);
 
   const panRef = useRef({ a: 0, b: 0 });
+  // keep panRef in sync so mousedown can read current pan without stale closure
   useEffect(() => { panRef.current = pan; }, [pan]);
 
-  // ── Popup / hover hint state ────────────────────────────────────────────────
-  const [selectedIdx, setSelectedIdx] = useState(null);   // index of point with open popup
-  const [hoverIdx, setHoverIdx] = useState(-1);           // index of point being hovered
-  const lastTap = useRef(0);                               // for double-tap detection
-
-  // close popup when clicking outside the disc
-  const popupRef = useRef(null);
-  useEffect(() => {
-    if (selectedIdx === null) return;
-    const handler = (e) => {
-      if (popupRef.current && popupRef.current.contains(e.target)) return;
-      // if click is on the canvas, onMouseUp handles it
-      if (ovRef.current && ovRef.current.contains(e.target)) return;
-      setSelectedIdx(null);
-    };
-    window.addEventListener("mousedown", handler);
-    window.addEventListener("touchstart", handler);
-    return () => { window.removeEventListener("mousedown", handler); window.removeEventListener("touchstart", handler); };
-  }, [selectedIdx]);
+  // ── Double-click / double-tap detection ──────────────────────────────────
+  const lastTap    = useRef({ t: 0, x: 0, y: 0 });
 
   const onMouseDown = useCallback((e) => {
+    // Ignore events originating from the popup
+    if (e.target && e.target.closest && e.target.closest('[data-popup]')) return;
+    // ignore multi-touch (pinch handled separately)
     if (e.touches && e.touches.length >= 2) return;
     didMove.current = false;
     const { x, y } = getPos(e);
@@ -634,8 +856,10 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   const onMouseMove = useCallback((e) => {
     if (!drag.current) return;
     if (e.touches && e.touches.length >= 2) { drag.current = null; return; }
+    if (!didMove.current) setIsDragging(true);
     didMove.current = true;
     const { x, y } = getPos(e);
+
     if (drag.current.kind === "point") {
       const [a, b] = p2l(x, y);
       const [ca, cb] = clampPt(a, b);
@@ -650,50 +874,65 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   }, [getPos, p2l, dp2dl, setPoints]);
 
   const onMouseUp = useCallback((e) => {
+    // Ignore events that originate from inside the popup
+    if (e.target && e.target.closest && e.target.closest('[data-popup]')) return;
+
     const wasDrag = drag.current !== null && didMove.current;
-    drag.current  = null;
-    if (wasDrag) { didMove.current = false; return; }
+    const dragKind = drag.current?.kind;
+    const dragIdx  = drag.current?.idx;
+    drag.current = null;
     didMove.current = false;
+    setIsDragging(false);
+    // If we dragged a point, don't close its popup
+    if (wasDrag && dragKind === "point") return;
+    if (wasDrag) return;
 
     const rect = ovRef.current.getBoundingClientRect();
     const sc = SIZE / rect.width;
     const src = e.changedTouches ? e.changedTouches[0] : e;
     const px = (src.clientX - rect.left) * sc;
     const py = (src.clientY - rect.top) * sc;
+
     const hit = hitTest(px, py);
-
-    // Double-tap detection for touch
     const now = Date.now();
-    const isDoubleTap = e.changedTouches && (now - lastTap.current < 350);
-    lastTap.current = now;
 
+    // ── Click on existing point → open popup ────────────────────────
     if (hit >= 0) {
-      // single click/tap on a point → open popup
-      setSelectedIdx(hit);
-    } else if (inDisc(px, py)) {
-      setSelectedIdx(null);
-      if (isDoubleTap) {
-        // double-tap (touch) → create point
-        if (points.length >= 8) return;
-        const [a, b] = p2l(px, py);
-        const [ca, cb] = clampPt(a, b);
-        setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
-      }
+      setHoverHint(null);
+      setPopup(p => p?.idx === hit ? null : { idx: hit });
+      return;
+    }
+
+    // ── Click on empty disc area ─────────────────────────────────────
+    if (!inDisc(px, py) || e.button === 2) return;
+
+    // Close popup on click outside
+    setPopup(null);
+
+    // Double-click / double-tap detection (within 400ms and 20px)
+    const dt = now - lastTap.current.t;
+    const dist = Math.hypot(px - lastTap.current.x, py - lastTap.current.y);
+    const isDouble = dt < 400 && dist < 20;
+
+    if (isDouble) {
+      // Create point on double click
+      lastTap.current = { t: 0, x: 0, y: 0 };
+      if (points.length >= 8) return;
+      const [a, b] = p2l(px, py);
+      const [ca, cb] = clampPt(a, b);
+      const newIdx = points.length; // will be appended at this index
+      setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
+      // Auto-open popup for the newly created point
+      setPopup({ idx: newIdx });
     } else {
-      setSelectedIdx(null);
+      // Single click on empty area → show hint + record for double-click detection
+      lastTap.current = { t: now, x: px, y: py };
+      // Show double-click hint at click position, auto-hide after 1.8s
+      setHoverHint({ x: px, y: py, kind: "empty", fromClick: true });
+      clearTimeout(window.__hintTimer);
+      window.__hintTimer = setTimeout(() => setHoverHint(h => h?.fromClick ? null : h), 1800);
     }
   }, [hitTest, inDisc, p2l, setPoints, points.length, Lval]);
-
-  const onDblClick = useCallback((e) => {
-    const { x, y } = getPos(e);
-    const hit = hitTest(x, y);
-    if (hit >= 0) return; // point click handled by single click
-    if (!inDisc(x, y)) return;
-    if (points.length >= 8) return;
-    const [a, b] = p2l(x, y);
-    const [ca, cb] = clampPt(a, b);
-    setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
-  }, [getPos, hitTest, inDisc, p2l, setPoints, points.length, Lval]);
 
   const onContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -705,7 +944,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     const now = Date.now();
     if (now - lastWh.current < 40) return;
     lastWh.current = now;
-    const steps = [1, 1.5, 2, 3, 4, 6, 7];
+    const steps = [1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30, 50, 75, 100];
     setZoom(z => {
       const idx = steps.findIndex(s => Math.abs(s - z) < 0.01);
       const ni = Math.max(0, Math.min(steps.length - 1, idx + (e.deltaY > 0 ? -1 : 1)));
@@ -714,7 +953,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   }, [setZoom]);
 
   // ── Pinch-to-zoom ────────────────────────────────────────────────────────────
-  const ZOOM_STEPS_P = [1, 1.5, 2, 3, 4, 6, 7];
+  const ZOOM_STEPS_P = [1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30, 50, 75, 100];
 
   const onTouchStartPinch = useCallback((e) => {
     if (e.touches.length === 2) {
@@ -844,7 +1083,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         ctx.strokeRect(16 * SCALE, ry - 2 * SCALE, 14 * SCALE, 14 * SCALE);
 
         ctx.fillStyle = "#111";
-        const txt = `${PLBLS[i]}   ${p.L}     ${Math.round(p.a)}     ${Math.round(p.b)}     ${C.toFixed(1)}     ${hDeg.toFixed(1)}°     ${hex.toUpperCase()}`;
+        const txt = `${PLBLS[i]}   ${p.L.toFixed(1)}     ${p.a.toFixed(1)}     ${p.b.toFixed(1)}     ${C.toFixed(1)}     ${hDeg.toFixed(1)}°     ${hex.toUpperCase()}`;
         ctx.fillText(txt, 36 * SCALE, ry);
         ry += rowH;
       });
@@ -882,12 +1121,26 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     const { x, y } = getPos(e);
     const hit = hitTest(x, y);
     const isPanning = drag.current?.kind === "pan";
-    setCursor(isPanning ? "grabbing" : hit >= 0 ? "pointer" : inDisc(x,y) ? "crosshair" : "default");
-    setHoverIdx(hit);
+    const isDraggingNow = drag.current !== null;
+
+    if (isPanning) {
+      setCursor("grabbing");
+      setHoverHint(null);
+    } else if (hit >= 0) {
+      setCursor("pointer");
+      setHoverHint(h => h?.fromClick ? h : { x, y, kind: "point", idx: hit });
+    } else if (inDisc(x, y)) {
+      setCursor(isDraggingNow ? "grabbing" : "crosshair");
+      // Only clear point hint when moving to empty area; don't set empty hint on hover
+      setHoverHint(h => (h && !h.fromClick) ? null : h);
+    } else {
+      setCursor("default");
+      setHoverHint(h => h?.fromClick ? h : null);
+    }
   }, [getPos, hitTest, inDisc]);
 
   return (
-    <div style={{ position: "relative", width: "100%", borderRadius: "50%",
+    <div ref={discContainerRef} style={{ position: "relative", width: "100%", borderRadius: "50%",
       background: showColor ? "transparent" : "var(--color-background-secondary)", flexShrink: 0 }}>
       <canvas ref={colRef} width={SIZE} height={SIZE}
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", display: "block" }} />
@@ -896,156 +1149,55 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         onMouseDown={onMouseDown}
         onTouchStart={onMouseDown}
         onMouseMove={onHover}
-        onDoubleClick={onDblClick}
+        onMouseLeave={() => setHoverHint(null)}
         onContextMenu={onContextMenu} />
 
-      {/* Hover hint on point: "Cliquer pour afficher les détails" */}
-      {hoverIdx >= 0 && selectedIdx === null && hoverIdx < points.length && (() => {
-        const pt = points[hoverIdx];
-        const el = ovRef.current;
-        if (!el) return null;
-        const rect = el.getBoundingClientRect();
-        const scale = rect.width / SIZE;
-        const { x: cpx, y: cpy } = l2p(pt.a, pt.b);
+      {/* Hover hint bubble */}
+      {hoverHint && !isDragging && (() => {
+        const isPoint = hoverHint.kind === "point";
+        if (isPoint && popup?.idx === hoverHint.idx) return null;
+        if (!isPoint && !hoverHint.fromClick) return null;
+        const text = isPoint
+          ? "Cliquer pour afficher les détails"
+          : "Double-clic pour créer un point";
+        const leftPct = hoverHint.x / 520 * 100;
+        const topPct  = hoverHint.y / 520 * 100;
         return (
           <div style={{
-            position: "absolute", left: cpx * scale, top: cpy * scale - 32,
-            transform: "translateX(-50%)", pointerEvents: "none",
-            background: "rgba(0,0,0,0.7)", color: "#fff",
+            position: "absolute",
+            left: `${leftPct}%`,
+            top:  `calc(${topPct}% - 34px)`,
+            transform: "translateX(-50%)",
+            background: isPoint ? "rgba(24,95,165,0.88)" : "rgba(0,0,0,0.72)",
+            color: "white",
             fontSize: 10, fontWeight: 600, padding: "4px 10px",
-            borderRadius: 6, whiteSpace: "nowrap", zIndex: 20,
-            backdropFilter: "blur(4px)",
+            borderRadius: 20, whiteSpace: "nowrap", pointerEvents: "none",
+            zIndex: 50, backdropFilter: "blur(4px)",
           }}>
-            Cliquer pour afficher les détails
+            {text}
           </div>
         );
       })()}
 
-      {/* Point edit popup */}
-      {selectedIdx !== null && selectedIdx < points.length && (() => {
-        const pt = points[selectedIdx];
-        const el = ovRef.current;
-        if (!el) return null;
-        const rect = el.getBoundingClientRect();
-        const scale = rect.width / SIZE;
-        const { x: cpx, y: cpy } = l2p(pt.a, pt.b);
-        const px = cpx * scale;
-        const py = cpy * scale;
-        const col = PCOLS[selectedIdx % PCOLS.length];
-        const C = Math.sqrt(pt.a * pt.a + pt.b * pt.b);
-        const hDeg = ((Math.atan2(pt.b, pt.a) * 180 / Math.PI) + 360) % 360;
-        const updatePt = (patch) => setPoints(pts => pts.map((p, i) => i === selectedIdx ? { ...p, ...patch } : p));
-        const setFromCH = (newC, newH) => {
-          const rad = newH * Math.PI / 180;
-          updatePt({ a: Math.round(newC * Math.cos(rad)), b: Math.round(newC * Math.sin(rad)) });
-        };
-
+      {/* Point popup — rendered via portal at fixed position */}
+      {popup !== null && points[popup.idx] && (() => {
+        const rect = discContainerRef.current?.getBoundingClientRect();
+        const initX = rect ? rect.left + rect.width / 2 - 140 : window.innerWidth / 2 - 140;
+        const initY = rect ? rect.bottom - 160 : window.innerHeight - 200;
         return (
-          <div ref={popupRef} style={{
-            position: "absolute",
-            left: Math.min(Math.max(px, 130), rect.width - 130),
-            top: Math.max(py - 16, 0),
-            transform: "translate(-50%, -100%)",
-            background: "var(--color-background-primary, #fff)",
-            border: `1.5px solid ${col}`,
-            borderRadius: 12, padding: "12px 14px", zIndex: 30,
-            boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
-            minWidth: 230, maxWidth: 260,
-          }}
-            onMouseDown={e => e.stopPropagation()}
-            onTouchStart={e => e.stopPropagation()}
-          >
-            {/* Header: swatch + name + close */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <div style={{
-                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                background: labToHex(pt.L, pt.a, pt.b),
-                border: `2px solid ${col}`,
-              }} />
-              <input
-                value={pt.name || ""}
-                placeholder={`Point ${PLBLS[selectedIdx]}`}
-                onChange={e => updatePt({ name: e.target.value })}
-                style={{
-                  flex: 1, fontSize: 12, fontWeight: 700, color: col,
-                  border: "none", borderBottom: `1px solid var(--color-border-secondary, #ddd)`,
-                  background: "transparent", outline: "none", padding: "2px 0",
-                  minWidth: 0,
-                }}
-              />
-              <button onClick={() => setSelectedIdx(null)} style={{
-                border: "none", background: "transparent", cursor: "pointer",
-                fontSize: 16, color: "var(--color-text-secondary, #999)", padding: 0, lineHeight: 1,
-              }}>×</button>
-            </div>
-
-            {/* Hex display */}
-            <div style={{ fontSize: 9, fontFamily: "monospace", color: "var(--color-text-secondary)", marginBottom: 8, textAlign: "center" }}>
-              {labToHex(pt.L, pt.a, pt.b).toUpperCase()}
-            </div>
-
-            {/* L* slider */}
-            <div style={{ marginBottom: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: "#888", minWidth: 16 }}>L*</span>
-                <input type="range" min={0} max={100} step={1} value={pt.L}
-                  onChange={e => updatePt({ L: +e.target.value })}
-                  style={{ flex: 1, height: 3, accentColor: "#888", cursor: "pointer" }} />
-                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{pt.L}</span>
-              </div>
-            </div>
-            {/* a* slider */}
-            <div style={{ marginBottom: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: "#c0392b", minWidth: 16 }}>a*</span>
-                <input type="range" min={-100} max={100} step={1} value={Math.round(pt.a)}
-                  onChange={e => updatePt({ a: +e.target.value })}
-                  style={{ flex: 1, height: 3, accentColor: "#c0392b", cursor: "pointer" }} />
-                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(pt.a)}</span>
-              </div>
-            </div>
-            {/* b* slider */}
-            <div style={{ marginBottom: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: "#e6ac00", minWidth: 16 }}>b*</span>
-                <input type="range" min={-100} max={100} step={1} value={Math.round(pt.b)}
-                  onChange={e => updatePt({ b: +e.target.value })}
-                  style={{ flex: 1, height: 3, accentColor: "#e6ac00", cursor: "pointer" }} />
-                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(pt.b)}</span>
-              </div>
-            </div>
-            {/* C* slider */}
-            <div style={{ marginBottom: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: "#1D9E75", minWidth: 16 }}>C*</span>
-                <input type="range" min={0} max={141} step={1} value={Math.round(C)}
-                  onChange={e => setFromCH(+e.target.value, hDeg)}
-                  style={{ flex: 1, height: 3, accentColor: "#1D9E75", cursor: "pointer" }} />
-                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(C)}</span>
-              </div>
-            </div>
-            {/* h° slider */}
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: "#185FA5", minWidth: 16 }}>h°</span>
-                <input type="range" min={0} max={360} step={1} value={Math.round(hDeg)}
-                  onChange={e => setFromCH(C, +e.target.value)}
-                  style={{ flex: 1, height: 3, accentColor: "#185FA5", cursor: "pointer" }} />
-                <span style={{ fontSize: 9, fontFamily: "monospace", minWidth: 22, textAlign: "right" }}>{Math.round(hDeg)}°</span>
-              </div>
-            </div>
-
-            {/* Delete button */}
-            <button
-              onClick={() => { setPoints(pts => pts.filter((_, i) => i !== selectedIdx)); setSelectedIdx(null); }}
-              style={{
-                width: "100%", padding: "5px 0", border: "1px solid #e74c3c",
-                borderRadius: 7, background: "rgba(231,76,60,0.08)", color: "#e74c3c",
-                fontSize: 10, fontWeight: 700, cursor: "pointer",
-              }}>
-              Supprimer ce point
-            </button>
-          </div>
+          <PointPopup
+            point={points[popup.idx]}
+            idx={popup.idx}
+            allPoints={points}
+            pairA={pairA}
+            pairB={pairB}
+            showDelta={showDelta}
+            initialX={initX}
+            initialY={initY}
+            onClose={() => setPopup(null)}
+            onDelete={() => { setPoints(pts => pts.filter((_, i) => i !== popup.idx)); setPopup(null); }}
+            onChange={updated => setPoints(pts => pts.map((p, i) => i === popup.idx ? updated : p))}
+          />
         );
       })()}
 
@@ -1063,29 +1215,51 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
           ↺ Recentrer
         </button>
       )}
+      {/* Zoom −/+ buttons — bottom-left of disc */}
+      {(() => {
+        const STEPS = [1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30, 50, 75, 100];
+        const idx = STEPS.findIndex(s => Math.abs(s - zoom) < 0.01);
+        const canZoomOut = idx > 0;
+        const canZoomIn  = idx < STEPS.length - 1;
+        const btnStyle = (enabled) => ({
+          width: 28, height: 28, borderRadius: 7,
+          border: "0.5px solid rgba(255,255,255,0.55)",
+          background: "rgba(0,0,0,0.38)", color: "white",
+          fontSize: 18, lineHeight: 1, fontWeight: 400,
+          cursor: enabled ? "pointer" : "default",
+          opacity: enabled ? 1 : 0.35,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(4px)",
+          userSelect: "none",
+        });
+        return (
+          <div style={{
+            position: "absolute", bottom: "7%", left: "7%",
+            display: "flex", flexDirection: "column", gap: 4, zIndex: 10,
+          }}>
+            <button style={btnStyle(canZoomIn)}
+              onClick={() => canZoomIn && setZoom(STEPS[idx + 1])}
+              title="Agrandir">+</button>
+            <button style={btnStyle(canZoomOut)}
+              onClick={() => canZoomOut && setZoom(STEPS[idx - 1])}
+              title="Réduire">−</button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
 // ─── Slider with precision ────────────────────────────────────────────────────
-function Slider({ label, color, min, max, value, onChange, step = 1 }) {
-  const [fine, setFine] = useState(false);
-  const s = fine ? 0.1 : step;
+function Slider({ label, color, min, max, value, onChange, step = 0.1 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
       <span style={{ fontSize: 9, color: color || "var(--color-text-secondary)", fontWeight: 600, minWidth: 14, flexShrink: 0 }}>{label}</span>
-      <input type="range" min={min} max={max} step={s} value={value}
-        onChange={e => onChange(+e.target.value)}
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Math.round(+e.target.value * 10) / 10)}
         style={{ flex: 1, height: 3, accentColor: color || "var(--color-text-primary)", cursor: "pointer", minWidth: 0 }} />
-      <button onClick={() => setFine(f => !f)} style={{
-        width: 12, height: 12, borderRadius: "50%", border: "none",
-        cursor: "pointer", fontSize: 7, fontWeight: 700, padding: 0,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: fine ? (color || "var(--color-text-primary)") : "rgba(128,128,128,0.15)",
-        color: fine ? "#fff" : "var(--color-text-secondary)", flexShrink: 0,
-      }}>·1</button>
-      <input type="number" min={min} max={max} step={s}
-        value={fine ? (+value).toFixed(1) : Math.round(value)}
+      <input type="number" min={min} max={max} step={step}
+        value={(+value).toFixed(1)}
         onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v))); }}
         style={{
           width: 38, fontSize: 9, fontWeight: 700, fontFamily: "monospace",
@@ -1213,11 +1387,11 @@ function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
             {/* Coord badges — inline compact */}
             <div style={{ display: "flex", gap: 3, marginBottom: 5, flexWrap: "wrap" }}>
               {[
-                ["L*", p.L,           "#888",    true],
-                ["a*", Math.round(p.a),"#c0392b", coordMode === "ab"],
-                ["b*", Math.round(p.b),"#e6ac00", coordMode === "ab"],
-                ["C*", C.toFixed(1),  "#1D9E75", coordMode === "ch"],
-                ["h°", h !== null ? Math.round(h)+"°" : "—", "#185FA5", coordMode === "ch"],
+                ["L*", p.L.toFixed(1),           "#888",    true],
+                ["a*", p.a.toFixed(1),            "#c0392b", coordMode === "ab"],
+                ["b*", p.b.toFixed(1),            "#e6ac00", coordMode === "ab"],
+                ["C*", C.toFixed(1),              "#1D9E75", coordMode === "ch"],
+                ["h°", h !== null ? h.toFixed(1)+"°" : "—", "#185FA5", coordMode === "ch"],
               ].map(([k, v, c, active]) => (
                 <div key={k} style={{
                   background: active ? c + "18" : "var(--color-background-secondary)",
@@ -1232,20 +1406,20 @@ function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
             </div>
 
             {/* Sliders — compact */}
-            <Slider label="L*" color="#888" min={0} max={100} value={p.L}
-              onChange={v => setPoints(pts => pts.map((pt,j) => j===i?{...pt,L:v}:pt))} />
+            <Slider label="L*" color="#888" min={0} max={100} step={0.1} value={p.L}
+              onChange={v => setPoints(pts => pts.map((pt,j) => j===i?{...pt,L:Math.round(v*10)/10}:pt))} />
 
             {coordMode === "ab" ? (
               <>
-                <Slider label="a*" color="#c0392b" min={-ARANGE} max={ARANGE} value={Math.round(p.a)}
-                  onChange={v => setPoints(pts => pts.map((pt,j) => j===i?{...pt,a:v}:pt))} />
-                <Slider label="b*" color="#e6ac00" min={-ARANGE} max={ARANGE} value={Math.round(p.b)}
-                  onChange={v => setPoints(pts => pts.map((pt,j) => j===i?{...pt,b:v}:pt))} />
+                <Slider label="a*" color="#c0392b" min={-ARANGE} max={ARANGE} step={0.1} value={p.a}
+                  onChange={v => setPoints(pts => pts.map((pt,j) => j===i?{...pt,a:Math.round(v*10)/10}:pt))} />
+                <Slider label="b*" color="#e6ac00" min={-ARANGE} max={ARANGE} step={0.1} value={p.b}
+                  onChange={v => setPoints(pts => pts.map((pt,j) => j===i?{...pt,b:Math.round(v*10)/10}:pt))} />
               </>
             ) : (
               <>
-                <Slider label="C*" color="#1D9E75" min={0} max={ARANGE} value={Math.round(C)} onChange={setC} />
-                <Slider label="h°" color="#185FA5" min={0} max={359} value={Math.round(h)} onChange={setH} />
+                <Slider label="C*" color="#1D9E75" min={0} max={ARANGE} step={0.1} value={Math.round(C*10)/10} onChange={setC} />
+                <Slider label="h°" color="#185FA5" min={0} max={359.9} step={0.1} value={Math.round(h*10)/10} onChange={setH} />
               </>
             )}
           </div>
@@ -1256,7 +1430,7 @@ function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
 }
 
 // ─── Delta panel ─────────────────────────────────────────────────────────────
-function DeltaPanel({ points, pairA, setPairA, pairB, setPairB }) {
+function DeltaPanel({ points, pairA, setPairA, pairB, setPairB, compact = false }) {
   // Resolve IDs → point objects (fallback to first/second if ID not found)
   const pa = points.find(p => p.id === pairA) || points[0];
   const pb = points.find(p => p.id === pairB) || points[1];
@@ -1275,47 +1449,40 @@ function DeltaPanel({ points, pairA, setPairA, pairB, setPairB }) {
   const ptLabel = (p, i) => `${i + 1}${p.name ? ` · ${p.name}` : ""}`;
 
   return (
-    <div className="cielab-card" style={{ padding: "12px 14px" }}>
-      <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 10 }}>Écart ΔE*₇₆</div>
+    <div className="cielab-card" style={{ padding: compact ? "8px 10px" : "12px 14px" }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: compact ? 7 : 10 }}>Écart colorimétrique</div>
 
-      {/* Pair selector — keyed by stable point ID */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-        <Select value={pairA} onValueChange={setPairA}>
-          <SelectTrigger>
-            <SelectValue label={pa ? ptLabel(pa, points.indexOf(pa)) : "—"} />
-          </SelectTrigger>
-          <SelectContent>
-            {points.map((p, i) => (
-              <SelectItem key={p.id} value={p.id}>
-                {ptLabel(p, i)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span style={{ fontSize: 13, color: "var(--color-text-secondary)", flexShrink: 0 }}>↔</span>
-        <Select value={pairB} onValueChange={setPairB}>
-          <SelectTrigger>
-            <SelectValue label={pb ? ptLabel(pb, points.indexOf(pb)) : "—"} />
-          </SelectTrigger>
-          <SelectContent>
-            {points.map((p, i) => (
-              <SelectItem key={p.id} value={p.id}>
-                {ptLabel(p, i)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      {/* Pair selector */}
+      <div style={{ display: "flex", flexDirection: "column", gap: compact ? 4 : 5, marginBottom: compact ? 8 : 12 }}>
+        {[["Standard", pairA, setPairA], ["Échantillon", pairB, setPairB]].map(([lbl, val, setter]) => {
+          const pt = points.find(p => p.id === val);
+          return (
+            <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 8, fontWeight: 700, color: "var(--color-text-secondary)", minWidth: compact ? 52 : 62, flexShrink: 0 }}>{lbl}</span>
+              <Select value={val} onValueChange={setter}>
+                <SelectTrigger style={{ fontSize: compact ? 10 : 11 }}>
+                  <SelectValue label={pt ? ptLabel(pt, points.indexOf(pt)) : "—"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {points.map((p, i) => (
+                    <SelectItem key={p.id} value={p.id}>{ptLabel(p, i)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
       </div>
 
       {/* Swatches */}
       {pa && pb && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-          {[pa, pb].map((p, ii) => (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: compact ? 5 : 8, marginBottom: compact ? 8 : 12 }}>
+          {[[pa, "Std"], [pb, "Éch"]].map(([p, role]) => (
             <div key={p.id}>
-              <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 3 }}>
-                {ptLabel(p, points.indexOf(p))}
+              <div style={{ fontSize: 8, color: "var(--color-text-secondary)", marginBottom: 2 }}>
+                {role} — {ptLabel(p, points.indexOf(p))}
               </div>
-              <div style={{ height: 28, borderRadius: 6, background: labToHex(p.L, p.a, p.b), border: "0.5px solid rgba(0,0,0,0.1)" }} />
+              <div style={{ height: compact ? 18 : 28, borderRadius: 5, background: labToHex(p.L, p.a, p.b), border: "0.5px solid rgba(0,0,0,0.1)" }} />
             </div>
           ))}
         </div>
@@ -1327,19 +1494,20 @@ function DeltaPanel({ points, pairA, setPairA, pairB, setPairB }) {
         </div>
       ) : (
         <>
-          <div style={{ textAlign: "center", padding: "4px 0 6px" }}>
-            <div style={{ fontSize: 44, fontWeight: 700, color, lineHeight: 1, fontFamily: "monospace" }}>{de.toFixed(2)}</div>
-            <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 3 }}>{label}</div>
+          <div style={{ textAlign: "center", padding: compact ? "2px 0 4px" : "4px 0 6px" }}>
+            <div style={{ fontSize: compact ? 9 : 11, color: "var(--color-text-secondary)", marginBottom: 1 }}>ΔE*₇₆ =</div>
+            <div style={{ fontSize: compact ? 32 : 44, fontWeight: 700, color, lineHeight: 1, fontFamily: "monospace" }}>{de.toFixed(2)}</div>
+            <div style={{ fontSize: compact ? 9 : 11, color: "var(--color-text-secondary)", marginTop: 2 }}>{label}</div>
           </div>
-          <div style={{ height: 5, background: "var(--color-background-secondary)", borderRadius: 3, overflow: "hidden", margin: "8px 0 10px" }}>
+          <div style={{ height: 4, background: "var(--color-background-secondary)", borderRadius: 3, overflow: "hidden", margin: compact ? "6px 0 7px" : "8px 0 10px" }}>
             <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 3, transition: "width .2s, background .2s" }} />
           </div>
           {/* Decomposition */}
-          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 3, marginBottom: compact ? 7 : 10 }}>
             {[["ΔL*", pb.L - pa.L, "#888"], ["Δa*", pb.a - pa.a, "#c0392b"], ["Δb*", pb.b - pa.b, "#e6ac00"]].map(([k, v, c]) => (
-              <div key={k} style={{ flex: 1, background: "var(--color-background-secondary)", borderRadius: 6, padding: "5px 4px", textAlign: "center" }}>
-                <div style={{ fontSize: 9, color: c, fontWeight: 700 }}>{k}</div>
-                <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace" }}>{v > 0 ? "+" : ""}{v.toFixed(1)}</div>
+              <div key={k} style={{ flex: 1, background: "var(--color-background-secondary)", borderRadius: 5, padding: "4px 3px", textAlign: "center" }}>
+                <div style={{ fontSize: 8, color: c, fontWeight: 700 }}>{k}</div>
+                <div style={{ fontSize: compact ? 9 : 10, fontWeight: 700, fontFamily: "monospace" }}>{v > 0 ? "+" : ""}{v.toFixed(1)}</div>
               </div>
             ))}
           </div>
@@ -1347,10 +1515,10 @@ function DeltaPanel({ points, pairA, setPairA, pairB, setPairB }) {
       )}
 
       {/* Scale legend */}
-      <div style={{ fontSize: 9, color: "var(--color-text-secondary)", lineHeight: 2, display: "flex", flexWrap: "wrap", gap: "0 8px" }}>
-        {[["< 1","Imperceptible","#1D9E75"],["1–2","Expert","#639922"],["2–3.5","Œil nu","#EF9F27"],["3.5–5","Nette","#D85A30"],["> 5","Majeure","#E24B4A"]].map(([r,l,c]) => (
-          <span key={r} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <span style={{ width: 6, height: 6, borderRadius: 2, background: c, display: "inline-block" }} />
+      <div style={{ fontSize: 8, color: "var(--color-text-secondary)", display: "flex", flexWrap: "wrap", gap: "2px 6px" }}>
+        {[["<1","Imperceptible","#1D9E75"],["1–2","Expert","#639922"],["2–3.5","Œil nu","#EF9F27"],["3.5–5","Nette","#D85A30"],[">5","Majeure","#E24B4A"]].map(([r,l,c]) => (
+          <span key={r} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+            <span style={{ width: 5, height: 5, borderRadius: 1, background: c, display: "inline-block", flexShrink: 0 }} />
             {r} {l}
           </span>
         ))}
@@ -1552,18 +1720,16 @@ export default function CIELABExplorer() {
   const [tab,       setTab]       = useState("carto");
   const [Lval,      setLval]      = useState(60);
   const [zoom,      setZoom]      = useState(1);
-  const [showPanel, setShowPanel] = useState(true);
   const [showColor, setShowColor] = useState(true);
   const [showGrid,  setShowGrid]  = useState(true);
   const [coordMode, setCoordMode] = useState("ab");
-  // appMode removed — now handled via separate tabs
   const [points,    setPoints]    = useState([
     { id: "p1", L: 60, a: 40,  b: 15, name: "" },
     { id: "p2", L: 60, a: -28, b: 40, name: "" },
   ]);
   const exportRef = useRef(null);
 
-  const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 7];
+  const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30, 50, 75, 100];
   const zoomIdx = ZOOM_STEPS.findIndex(s => Math.abs(s - zoom) < 0.01);
   const handleLval = (v) => { setLval(v); };
 
@@ -1580,6 +1746,8 @@ export default function CIELABExplorer() {
       zoom={zoom} setZoom={setZoom}
       showColor={showColor} showGrid={showGrid} Lval={Lval}
       coordMode={coordMode} exportRef={exportRef}
+      pairA={pairA} pairB={pairB}
+      showDelta={tab === "analyse"}
       pairLine={tab === "analyse" && idxA >= 0 && idxB >= 0 && idxA !== idxB ? [idxA, idxB] : null} />
   );
 
@@ -1616,13 +1784,6 @@ export default function CIELABExplorer() {
       <button className={`cielab-tb-btn${showGrid ? " active-grid" : ""}`} onClick={() => setShowGrid(v => !v)} title={showGrid ? "Masquer grille" : "Afficher grille"}>
         <Grid3x3 size={13} />
       </button>
-      <button className={`cielab-tb-btn${!showPanel ? " active-panel" : ""}`} onClick={() => setShowPanel(v => !v)} title={showPanel ? "Masquer panneau" : "Afficher panneau"}>
-        {showPanel ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
-      </button>
-      <Sep />
-      <span style={{ fontSize: 9, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
-        Clic ajouter · Clic droit retirer
-      </span>
       <div style={{ marginLeft: "auto" }}>
         <button className="cielab-export-btn" onClick={() => exportRef.current && exportRef.current()} title="Exporter PNG">
           <Download size={12} /> PNG
@@ -1644,59 +1805,24 @@ export default function CIELABExplorer() {
         </TabsList>
       </Tabs>
 
-      {/* ── SHARED DISC LAYOUT helper ── */}
+      {/* ── SHARED DISC LAYOUT ── */}
       {(tab === "carto" || tab === "analyse") && (
         <div>
           {toolbar}
-          {showPanel ? (
-            <div style={{ display: "grid", gridTemplateColumns: `auto minmax(0,1fr) 272px${tab === "analyse" ? " 252px" : ""}`, gap: 10, alignItems: "start" }}>
-              <CoordPill coordMode={coordMode} setCoordMode={setCoordMode} />
-              <div style={{ display: "flex", gap: 8, alignItems: "stretch", width: "100%", maxWidth: "calc(100vh - 160px)" }}>
-                <div style={{ flex: 1, minWidth: 0, aspectRatio: "1 / 1" }}>{disc}</div>
-                <div style={{ width: 112, flexShrink: 0 }}><LAxis points={points} setPoints={setPoints} /></div>
-              </div>
-              <div style={{ overflowY: "auto", maxHeight: "calc(100vh - 140px)" }}>
-                <PointsPanel points={points} setPoints={setPoints} coordMode={coordMode} setCoordMode={setCoordMode} />
-              </div>
-              {tab === "analyse" && <DeltaPanel points={points} pairA={pairA} setPairA={setPairA} pairB={pairB} setPairB={setPairB} />}
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", alignItems: "flex-start" }}>
-              <CoordPill coordMode={coordMode} setCoordMode={setCoordMode} />
-              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ maxWidth: "calc(100vh - 140px)", display: "flex", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>{disc}</div>
-                  <div style={{ width: 112, alignSelf: "stretch" }}><LAxis points={points} setPoints={setPoints} /></div>
-                </div>
-                {points.length === 1 ? (
-                  <div style={{ marginTop: 10, background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 11, padding: "12px 14px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ width: 42, height: 42, borderRadius: 8, background: labToHex(points[0].L, points[0].a, points[0].b), border: `2px solid ${PCOLS[0]}`, flexShrink: 0 }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: PCOLS[0], marginBottom: 5 }}>
-                          {points[0].name || PLBLS[0]}
-                          <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--color-text-secondary)", marginLeft: 8, fontWeight: 400 }}>{labToHex(points[0].L, points[0].a, points[0].b).toUpperCase()}</span>
-                        </div>
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {[["L*", points[0].L, "#888"],["a*", Math.round(points[0].a), "#c0392b"],["b*", Math.round(points[0].b), "#e6ac00"],
-                            ["C*", Math.sqrt(points[0].a**2+points[0].b**2).toFixed(1), "#1D9E75"],
-                            ["h°", (((Math.atan2(points[0].b,points[0].a)*180/Math.PI)+360)%360).toFixed(1)+"°", "#185FA5"]
-                          ].map(([k,v,c]) => (
-                            <div key={k} style={{ background: "var(--color-background-secondary)", borderRadius: 5, padding: "2px 7px", fontSize: 10 }}>
-                              <span style={{ color: "var(--color-text-secondary)", marginRight: 2 }}>{k}</span>
-                              <span style={{ fontWeight: 700, color: c, fontFamily: "monospace" }}>{v}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", alignItems: "flex-start" }}>
+            <CoordPill coordMode={coordMode} setCoordMode={setCoordMode} />
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ maxWidth: "calc(100vh - 140px)", display: "flex", gap: 8, alignItems: "stretch" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>{disc}</div>
+                {tab === "analyse" && (
+                  <div style={{ width: 200, flexShrink: 0, alignSelf: "flex-start" }}>
+                    <DeltaPanel points={points} pairA={pairA} setPairA={setPairA} pairB={pairB} setPairB={setPairB} compact />
                   </div>
-                ) : points.length >= 2 && tab === "analyse" ? (
-                  <div style={{ marginTop: 10 }}><DeltaPanel points={points} pairA={pairA} setPairA={setPairA} pairB={pairB} setPairB={setPairB} /></div>
-                ) : null}
+                )}
+                <div style={{ width: 112, alignSelf: "stretch", flexShrink: 0 }}><LAxis points={points} setPoints={setPoints} /></div>
               </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -1707,7 +1833,7 @@ export default function CIELABExplorer() {
             {points.length > 0 ? <>
               <div style={{ height: 60, borderRadius: 7, background: labToHex(points[0].L, points[0].a, points[0].b), marginBottom: 10, border: "0.5px solid rgba(0,0,0,0.07)" }} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5, marginBottom: 10 }}>
-                {[["L*",points[0].L,"#888"],["a*",Math.round(points[0].a),"#c0392b"],["b*",Math.round(points[0].b),"#e6ac00"],
+                {[["L*",points[0].L.toFixed(1),"#888"],["a*",points[0].a.toFixed(1),"#c0392b"],["b*",points[0].b.toFixed(1),"#e6ac00"],
                   ["C*",Math.sqrt(points[0].a**2+points[0].b**2).toFixed(1),"#1D9E75"],
                   ["h°",(((Math.atan2(points[0].b,points[0].a)*180/Math.PI)+360)%360).toFixed(1)+"°","#185FA5"],
                   ["HEX",labToHex(points[0].L,points[0].a,points[0].b).toUpperCase(),"#888"]
@@ -1723,12 +1849,12 @@ export default function CIELABExplorer() {
           <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 11, padding: 14 }}>
             <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 12 }}>Contrôles (point ①)</div>
             {points.length > 0 ? <>
-              <Slider label="L*" color="#888" min={0} max={100} value={points[0].L}
-                onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,L:v}:p))} />
-              <Slider label="a*  rouge(+) / vert(−)" color="#c0392b" min={-ARANGE} max={ARANGE} value={Math.round(points[0].a)}
-                onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,a:v}:p))} />
-              <Slider label="b*  jaune(+) / bleu(−)" color="#e6ac00" min={-ARANGE} max={ARANGE} value={Math.round(points[0].b)}
-                onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,b:v}:p))} />
+              <Slider label="L*" color="#888" min={0} max={100} step={0.1} value={points[0].L}
+                onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,L:Math.round(v*10)/10}:p))} />
+              <Slider label="a*  rouge(+) / vert(−)" color="#c0392b" min={-ARANGE} max={ARANGE} step={0.1} value={points[0].a}
+                onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,a:Math.round(v*10)/10}:p))} />
+              <Slider label="b*  jaune(+) / bleu(−)" color="#e6ac00" min={-ARANGE} max={ARANGE} step={0.1} value={points[0].b}
+                onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,b:Math.round(v*10)/10}:p))} />
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 7 }}>Préréglages</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
