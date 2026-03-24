@@ -1,3 +1,4 @@
+// CIELABExplorer v4 — ellipse ΔE stepper
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { ZoomIn, ZoomOut, Download, Eye, EyeOff, Grid3x3, RotateCcw, ChevronDown } from "lucide-react";
 
@@ -90,7 +91,7 @@ function SelectItem({ value, children }) {
   );
 }
 
-// ─── CSS variables ────────────────────────────────────────────────────────────
+// ─── CSS variables ──────────────────────────────────────────────────────────
 const CSS_VARS = `
   :root {
     --color-background-primary:   #ffffff;
@@ -190,7 +191,7 @@ const SIZE   = 520;
 const CX     = SIZE / 2, CY = SIZE / 2;
 const ARANGE = 100; // axis always ±100
 
-// ─── Stepper button with hover tooltip ───────────────────────────────────────
+// ─── Stepper button with hover tooltip ──────────────────────────────────────
 function HintBtn({ children, onClick, style, hint, hintColor }) {
   const [show, setShow] = useState(false);
   return (
@@ -213,7 +214,7 @@ function HintBtn({ children, onClick, style, hint, hintColor }) {
   );
 }
 
-// ─── Point popup ─────────────────────────────────────────────────────────────
+// ─── Point popup ────────────────────────────────────────────────────────────
 function PointPopup({ point, idx, allPoints, pairA, pairB, showDelta, onClose, onDelete, onChange, initialX, initialY }) {
   const C = Math.sqrt(point.a ** 2 + point.b ** 2);
   const h = (((Math.atan2(point.b, point.a) * 180 / Math.PI) + 360) % 360);
@@ -362,7 +363,7 @@ function PointPopup({ point, idx, allPoints, pairA, pairB, showDelta, onClose, o
             display: "flex", alignItems: "center", justifyContent: "space-between",
           }}>
             <div>
-              <div style={{ fontSize: 7, fontWeight: 700, color: "var(--color-text-secondary)" }}>ΔE*₇₆ {isStandard ? "→ Éch." : "→ Std."}</div>
+              <div style={{ fontSize: 7, fontWeight: 700, color: "var(--color-text-secondary)" }}>ΔE*ab {isStandard ? "→ Éch." : "→ Std."}</div>
               <div style={{ fontSize: 7, color: "var(--color-text-secondary)" }}>{otherPoint.name || `Pt ${allPoints.indexOf(otherPoint) + 1}`}</div>
             </div>
             <div style={{ textAlign: "right" }}>
@@ -402,8 +403,8 @@ function PointPopup({ point, idx, allPoints, pairA, pairB, showDelta, onClose, o
 
 }
 
-// ─── Disc canvas ─────────────────────────────────────────────────────────────
-function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval, coordMode, exportRef, pairLine = null, pairA = null, pairB = null, showDelta = false }) {
+// ─── Disc canvas ────────────────────────────────────────────────────────────
+function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, showEllipse = false, ellipseDE = 1, Lval, coordMode, exportRef, pairLine = null, pairA = null, pairB = null, showDelta = false }) {
   const colRef    = useRef(null);
   const ovRef     = useRef(null);
   const discContainerRef = useRef(null);
@@ -459,7 +460,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     return [Math.round(a), Math.round(b)];
   };
 
-  // ── Color fill ──────────────────────────────────────────────────────────────
+  //── Color fill ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const cv = colRef.current; if (!cv) return;
     const ctx = cv.getContext("2d");
@@ -483,7 +484,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     ctx.putImageData(img, 0, 0);
   }, [L, zoom, showColor, visRange, pan]);
 
-  // ── Overlay: grid + axes + labels + points ─────────────────────────────────
+  // ── Overlay: grid + axes + labels + points ────────────────────────────────
   useEffect(() => {
     const cv = ovRef.current; if (!cv) return;
     const ctx = cv.getContext("2d");
@@ -495,7 +496,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     // LAB value v → canvas y (for b* axis) accounting for pan
     const vToY = v => CY - ((v - pan.b) / visRange) * (SIZE / 2);
 
-    // ── Grid (clipped to disc) ─────────────────────────────────────────────
+    // ── Grid (clipped to disc) ──────────────────────────────────────────
     ctx.save();
     ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI * 2); ctx.clip();
 
@@ -563,7 +564,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       ctx.beginPath(); ctx.arc(axisX, axisY, 3.5, 0, Math.PI * 2); ctx.fill();
     }
 
-    // ── Reticule at screen centre (CX, CY) — always visible ──────────────
+    // ── Reticule at screen centre (CX, CY) — always visible ─────────────
     const RET = 14;  // half-length of reticule arms
     const GAP = 4;   // gap around centre dot
     ctx.strokeStyle = "rgba(0,0,0,0.60)";
@@ -581,7 +582,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
 
     ctx.restore();
 
-    // ── Tick labels (no background — direct text with shadow for readability) ─
+    // ── Tick labels (no background — direct text with shadow for readability) –
     if (showGrid) {
       ctx.font = "900 12px sans-serif"; // maximum weight
       ctx.textBaseline = "middle";
@@ -631,7 +632,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       const tw = ctx.measureText(text).width;
       const PAD = 4;
       const H = 18; // pill height
-      const R = H / 2; // border-radius = 1em ≈ half height for pill
+      const R = H / 2; // border-radius = 1em → half height for pill
 
       // Compute pill rect top-left based on alignment
       let rx, ry;
@@ -677,7 +678,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
 
 
 
-    // ── C*/h° cylindrical visuals ────────────────────────────────────────────
+    // ── C*/h° cylindrical visuals ───────────────────────────────────────────
     if (coordMode === "ch") {
       // NO disc clip — circles must be fully visible outside disc boundary too
       points.forEach((p, i) => {
@@ -694,7 +695,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         // C* radius in canvas pixels, grows with zoom
         const cPx = (C / visRange) * (SIZE / 2);
 
-        // ── Single solid circle at C* distance (no sub-rings) ─────────────
+        // ── Single solid circle at C* distance (no sub-rings) ────────────
         if (cPx >= 3) {
           ctx.beginPath();
           ctx.arc(origX, origY, cPx, 0, Math.PI * 2);
@@ -719,7 +720,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         ctx.fillStyle = "rgba(30,158,117,0.95)";
         ctx.fillText(`C*=${C.toFixed(1)}`, cLblX, cLblY);
 
-        // ── Radius line from origin to point ────────────────────────────────
+        // ── Radius line from origin to point ─────────────────────────────
         ctx.beginPath();
         ctx.moveTo(origX, origY);
         ctx.lineTo(px, py);
@@ -729,7 +730,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // ── Angle arc — scales with zoom, minimum useful size ───────────────
+        // ── Angle arc — scales with zoom, minimum useful size ────────────
         // Base arc radius = 40px at zoom=1, grows with zoom
         const arcR = Math.max(28, Math.min(cPx * 0.55, 28 * zoom));
         // Canvas angle convention: LAB +a* = canvas right (angle 0)
@@ -775,7 +776,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     } else {
       // Cartesian mode: no extra decorations from origin
     }
-    // ── Line between selected pair only ──────────────────────────────────────
+    // ── Line between selected pair only ─────────────────────────────────────
     if (pairLine && points[pairLine[0]] && points[pairLine[1]]) {
       const pa = l2p(points[pairLine[0]].a, points[pairLine[0]].b);
       const pb = l2p(points[pairLine[1]].a, points[pairLine[1]].b);
@@ -784,7 +785,55 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       ctx.setLineDash([5, 3]); ctx.stroke(); ctx.setLineDash([]);
     }
 
-    // ── Points ───────────────────────────────────────────────────────────────
+    // ── ΔE tolerance ellipses ───────────────────────────────────────────────
+    if (showEllipse) {
+      points.forEach((p) => {
+        const { x: cx, y: cy } = l2p(p.a, p.b);
+        const hRad    = Math.atan2(p.b, p.a);
+        const labToPx = (SIZE / 2) / visRange;
+
+        const rx_px = ellipseDE * labToPx * 2.0; // long axis along hue
+        const ry_px = ellipseDE * labToPx * 1.0; // short axis along saturation
+        if (rx_px < 0.5) return;
+
+        // Draw ellipse — black dashed
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(-hRad);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rx_px, ry_px, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(0,0,0,0.75)";
+        ctx.lineWidth   = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
+        // Label at topmost screen point
+        const cosH = Math.cos(-hRad), sinH = Math.sin(-hRad);
+        const t1 = Math.atan2(ry_px * Math.cos(hRad), rx_px * Math.sin(hRad));
+        const t2 = t1 + Math.PI;
+        const y1 = cy + rx_px * Math.cos(t1) * sinH + ry_px * Math.sin(t1) * cosH;
+        const y2 = cy + rx_px * Math.cos(t2) * sinH + ry_px * Math.sin(t2) * cosH;
+        const tTop = y1 < y2 ? t1 : t2;
+        const lblX = cx + rx_px * Math.cos(tTop) * cosH - ry_px * Math.sin(tTop) * sinH;
+        const lblY = cy + rx_px * Math.cos(tTop) * sinH + ry_px * Math.sin(tTop) * cosH - 5;
+
+        ctx.save();
+        ctx.font = "600 8px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.lineWidth   = 2;
+        ctx.lineJoin    = "round";
+        ctx.strokeText(`ΔE ${ellipseDE.toFixed(1)}`, lblX, lblY);
+        ctx.fillStyle   = "rgba(0,0,0,0.80)";
+        ctx.fillText(`ΔE ${ellipseDE.toFixed(1)}`, lblX, lblY);
+        ctx.restore();
+      });
+    }
+
+    // ── Points ──────────────────────────────────────────────────────────────
     points.forEach((p, i) => {
       const { x, y } = l2p(p.a, p.b);
       const hex = labToHex(p.L, p.a, p.b);
@@ -808,9 +857,9 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       ctx.fillStyle = "rgba(0,0,0,1)";
       ctx.fillText(lbl, x, y - 10);
     });
-  }, [L, points, zoom, showColor, showGrid, visRange, pan, l2p, coordMode, pairLine]);
+  }, [L, points, zoom, showColor, showGrid, showEllipse, ellipseDE, visRange, pan, l2p, coordMode, pairLine]);
 
-  // ── Input helpers ──────────────────────────────────────────────────────────
+  // ── Input helpers ─────────────────────────────────────────────────────────
   const getPos = useCallback((e) => {
     const rect = ovRef.current.getBoundingClientRect();
     const sc = SIZE / rect.width;
@@ -833,7 +882,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   // keep panRef in sync so mousedown can read current pan without stale closure
   useEffect(() => { panRef.current = pan; }, [pan]);
 
-  // ── Double-click / double-tap detection ──────────────────────────────────
+  // ── Double-click / double-tap detection ───────────────────────────────────
   const lastTap    = useRef({ t: 0, x: 0, y: 0 });
 
   const onMouseDown = useCallback((e) => {
@@ -896,14 +945,14 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     const hit = hitTest(px, py);
     const now = Date.now();
 
-    // ── Click on existing point → open popup ────────────────────────
+    // ── Click on existing point → open popup ────────────────────
     if (hit >= 0) {
       setHoverHint(null);
       setPopup(p => p?.idx === hit ? null : { idx: hit });
       return;
     }
 
-    // ── Click on empty disc area ─────────────────────────────────────
+    // ── Click on empty disc area ────────────────────────────────
     if (!inDisc(px, py) || e.button === 2) return;
 
     // Close popup on click outside
@@ -938,7 +987,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     e.preventDefault();
   }, []);
 
-  // ── Wheel zoom ─────────────────────────────────────────────────────────────
+  // ── Wheel zoom ────────────────────────────────────────────────────────────
   const onWheel = useCallback((e) => {
     e.preventDefault();
     const now = Date.now();
@@ -952,7 +1001,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     });
   }, [setZoom]);
 
-  // ── Pinch-to-zoom ────────────────────────────────────────────────────────────
+  // ── Pinch-to-zoom ─────────────────────────────────────────────────────────
   const ZOOM_STEPS_P = [1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30, 50, 75, 100];
 
   const onTouchStartPinch = useCallback((e) => {
@@ -1030,11 +1079,11 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       out.height = TOTAL_H;
       const ctx = out.getContext("2d");
 
-      // ── White background ──────────────────────────────────────────────────
+      // ── White background ──────────────────────────────────────────────
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, W, TOTAL_H);
 
-      // ── Disc: composite color + overlay ──────────────────────────────────
+      // ── Disc: composite color + overlay ───────────────────────────────
       ctx.save();
       ctx.beginPath();
       ctx.arc(W / 2, W / 2, W / 2 - 1, 0, Math.PI * 2);
@@ -1047,7 +1096,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
       ctx.arc(W / 2, W / 2, W / 2 - 1, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(0,0,0,0.15)"; ctx.lineWidth = 2 * SCALE; ctx.stroke();
 
-      // ── Info panel ────────────────────────────────────────────────────────
+      // ── Info panel ────────────────────────────────────────────────────
       const iY = W + 8 * SCALE; // start y of info
       ctx.fillStyle = "#f7f7f7";
       ctx.fillRect(0, W, W, INFO_H);
@@ -1093,7 +1142,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         ry += 4 * SCALE;
         ctx.font = `bold ${10 * SCALE}px sans-serif`;
         ctx.fillStyle = "#555";
-        ctx.fillText("Écarts ΔE*₇₆", 16 * SCALE, ry);
+        ctx.fillText("Écarts ΔE*ab", 16 * SCALE, ry);
         ry += rowH * 0.8;
         ctx.font = `${10 * SCALE}px sans-serif`;
         for (let i = 0; i < points.length - 1; i++) {
@@ -1101,7 +1150,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
             const de = dE(points[i].L, points[i].a, points[i].b, points[j].L, points[j].a, points[j].b);
             const { label } = interpDE(de);
             ctx.fillStyle = "#111";
-            ctx.fillText(`${PLBLS[i]} ↔ ${PLBLS[j]}  ΔE = ${de.toFixed(2)}  (${label})`, 16 * SCALE, ry);
+            ctx.fillText(`${PLBLS[i]} → ${PLBLS[j]}  ΔE = ${de.toFixed(2)}  (${label})`, 16 * SCALE, ry);
             ry += rowH * 0.8;
           }
         }
@@ -1212,7 +1261,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
             background: "rgba(0,0,0,0.35)", color: "white",
             borderRadius: 20, backdropFilter: "blur(4px)", zIndex: 10,
           }}>
-          ↺ Recentrer
+          ⟳ Recentrer
         </button>
       )}
       {/* Zoom −/+ buttons — bottom-left of disc */}
@@ -1250,7 +1299,7 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   );
 }
 
-// ─── Slider with precision ────────────────────────────────────────────────────
+// ─── Slider with precision ──────────────────────────────────────────────────
 function Slider({ label, color, min, max, value, onChange, step = 0.1 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
@@ -1271,7 +1320,7 @@ function Slider({ label, color, min, max, value, onChange, step = 0.1 }) {
   );
 }
 
-// ─── Icon toggle button ───────────────────────────────────────────────────────
+// ─── Icon toggle button ────────────────────────────────────────────────────
 function Btn({ children, active, onClick, title, accent }) {
   return (
     <button title={title} onClick={onClick} style={{
@@ -1284,7 +1333,7 @@ function Btn({ children, active, onClick, title, accent }) {
   );
 }
 
-// ── Coord helpers ──────────────────────────────────────────────────────────────
+// ── Coord helpers ───────────────────────────────────────────────────────────
 function abToCH(a, b) {
   const C = Math.sqrt(a * a + b * b);
   const h = (a === 0 && b === 0) ? 0 : ((Math.atan2(b, a) * 180 / Math.PI) + 360) % 360;
@@ -1295,7 +1344,7 @@ function chToAB(C, h) {
   return { a: Math.round(C * Math.cos(rad)), b: Math.round(C * Math.sin(rad)) };
 }
 
-// ─── Points panel ─────────────────────────────────────────────────────────────
+// ─── Points panel ───────────────────────────────────────────────────────────
 function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
 
   if (points.length === 0) return (
@@ -1343,7 +1392,7 @@ function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
       <div style={{ fontSize: 10, color: "var(--color-text-secondary)", lineHeight: 1.5, padding: "4px 6px",
         background: "var(--color-background-secondary)", borderRadius: 7 }}>
         {coordMode === "ab"
-          ? <><b style={{ fontWeight: 600 }}>a*</b> rouge(+) ↔ vert(−) &nbsp;·&nbsp; <b style={{ fontWeight: 600 }}>b*</b> jaune(+) ↔ bleu(−)</>
+          ? <><b style={{ fontWeight: 600 }}>a*</b> rouge(+) — vert(−) &nbsp;·&nbsp; <b style={{ fontWeight: 600 }}>b*</b> jaune(+) — bleu(−)</>
           : <><b style={{ fontWeight: 600 }}>C*</b> = √(a*²+b*²) distance à l'origine = saturation &nbsp;·&nbsp; <b style={{ fontWeight: 600 }}>h°</b> = arctan(b*/a*) angle de teinte 0–360°</>}
       </div>
 
@@ -1391,7 +1440,7 @@ function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
                 ["a*", p.a.toFixed(1),            "#c0392b", coordMode === "ab"],
                 ["b*", p.b.toFixed(1),            "#e6ac00", coordMode === "ab"],
                 ["C*", C.toFixed(1),              "#1D9E75", coordMode === "ch"],
-                ["h°", h !== null ? h.toFixed(1)+"°" : "—", "#185FA5", coordMode === "ch"],
+                ["h°", h !== null ? h.toFixed(1)+"°" : "–", "#185FA5", coordMode === "ch"],
               ].map(([k, v, c, active]) => (
                 <div key={k} style={{
                   background: active ? c + "18" : "var(--color-background-secondary)",
@@ -1429,7 +1478,7 @@ function PointsPanel({ points, setPoints, coordMode, setCoordMode }) {
   );
 }
 
-// ─── Delta panel ─────────────────────────────────────────────────────────────
+// ─── Delta panel ────────────────────────────────────────────────────────────
 function DeltaPanel({ points, pairA, setPairA, pairB, setPairB, compact = false }) {
   // Resolve IDs → point objects (fallback to first/second if ID not found)
   const pa = points.find(p => p.id === pairA) || points[0];
@@ -1461,7 +1510,7 @@ function DeltaPanel({ points, pairA, setPairA, pairB, setPairB, compact = false 
               <span style={{ fontSize: 8, fontWeight: 700, color: "var(--color-text-secondary)", minWidth: compact ? 52 : 62, flexShrink: 0 }}>{lbl}</span>
               <Select value={val} onValueChange={setter}>
                 <SelectTrigger style={{ fontSize: compact ? 10 : 11 }}>
-                  <SelectValue label={pt ? ptLabel(pt, points.indexOf(pt)) : "—"} />
+                  <SelectValue label={pt ? ptLabel(pt, points.indexOf(pt)) : "–"} />
                 </SelectTrigger>
                 <SelectContent>
                   {points.map((p, i) => (
@@ -1495,7 +1544,7 @@ function DeltaPanel({ points, pairA, setPairA, pairB, setPairB, compact = false 
       ) : (
         <>
           <div style={{ textAlign: "center", padding: compact ? "2px 0 4px" : "4px 0 6px" }}>
-            <div style={{ fontSize: compact ? 9 : 11, color: "var(--color-text-secondary)", marginBottom: 1 }}>ΔE*₇₆ =</div>
+            <div style={{ fontSize: compact ? 9 : 11, color: "var(--color-text-secondary)", marginBottom: 1 }}>ΔE*ab =</div>
             <div style={{ fontSize: compact ? 32 : 44, fontWeight: 700, color, lineHeight: 1, fontFamily: "monospace" }}>{de.toFixed(2)}</div>
             <div style={{ fontSize: compact ? 9 : 11, color: "var(--color-text-secondary)", marginTop: 2 }}>{label}</div>
           </div>
@@ -1554,7 +1603,7 @@ const CoordPill = ({ coordMode, setCoordMode }) => (
   </div>
 );
 
-// ─── L* vertical axis ─────────────────────────────────────────────────────────
+// ─── L* vertical axis ──────────────────────────────────────────────────────
 function LAxis({ points, setPoints }) {
   const svgRef = useRef(null);
   const dragging = useRef(null);
@@ -1722,6 +1771,8 @@ export default function CIELABExplorer() {
   const [zoom,      setZoom]      = useState(1);
   const [showColor, setShowColor] = useState(true);
   const [showGrid,  setShowGrid]  = useState(true);
+  const [showEllipse, setShowEllipse] = useState(false);
+  const [ellipseDE,   setEllipseDE]   = useState(1.0);
   const [coordMode, setCoordMode] = useState("ab");
   const [points,    setPoints]    = useState([
     { id: "p1", L: 60, a: 40,  b: 15, name: "" },
@@ -1744,7 +1795,7 @@ export default function CIELABExplorer() {
   const disc = (
     <AbDisc L={Lval} points={points} setPoints={setPoints}
       zoom={zoom} setZoom={setZoom}
-      showColor={showColor} showGrid={showGrid} Lval={Lval}
+      showColor={showColor} showGrid={showGrid} showEllipse={tab === "analyse" && showEllipse} ellipseDE={ellipseDE} Lval={Lval}
       coordMode={coordMode} exportRef={exportRef}
       pairA={pairA} pairB={pairB}
       showDelta={tab === "analyse"}
@@ -1784,6 +1835,29 @@ export default function CIELABExplorer() {
       <button className={`cielab-tb-btn${showGrid ? " active-grid" : ""}`} onClick={() => setShowGrid(v => !v)} title={showGrid ? "Masquer grille" : "Afficher grille"}>
         <Grid3x3 size={13} />
       </button>
+      {tab === "analyse" && (
+        <>
+          <button className={`cielab-tb-btn${showEllipse ? " active-clr" : ""}`}
+            onClick={() => setShowEllipse(v => !v)}
+            title={showEllipse ? "Masquer ellipses ΔE" : "Afficher ellipses ΔE"}
+            style={showEllipse ? { background: "#7c3aed", color: "#fff", borderColor: "#7c3aed" } : {}}>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "-0.5px" }}>ΔE</span>
+          </button>
+          {showEllipse && (
+            <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--color-background-secondary)", borderRadius: 6, padding: "2px 4px", border: "1px solid #e4e4e7" }}>
+              <button onClick={() => setEllipseDE(v => Math.max(0.5, Math.round((v - 1) * 10) / 10))}
+                style={{ width: 20, height: 20, border: "none", background: "transparent", cursor: "pointer", fontSize: 10, fontWeight: 700, color: "#525252", padding: 0, lineHeight: 1 }} title="−1">«</button>
+              <button onClick={() => setEllipseDE(v => Math.max(0.5, Math.round((v - 0.1) * 10) / 10))}
+                style={{ width: 16, height: 20, border: "none", background: "transparent", cursor: "pointer", fontSize: 10, fontWeight: 700, color: "#525252", padding: 0, lineHeight: 1 }} title="−0.1">‹</button>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", minWidth: 28, textAlign: "center", color: "#7c3aed" }}>{ellipseDE.toFixed(1)}</span>
+              <button onClick={() => setEllipseDE(v => Math.min(20, Math.round((v + 0.1) * 10) / 10))}
+                style={{ width: 16, height: 20, border: "none", background: "transparent", cursor: "pointer", fontSize: 10, fontWeight: 700, color: "#525252", padding: 0, lineHeight: 1 }} title="+0.1">›</button>
+              <button onClick={() => setEllipseDE(v => Math.min(20, Math.round((v + 1) * 10) / 10))}
+                style={{ width: 20, height: 20, border: "none", background: "transparent", cursor: "pointer", fontSize: 10, fontWeight: 700, color: "#525252", padding: 0, lineHeight: 1 }} title="+1">»</button>
+            </div>
+          )}
+        </>
+      )}
       <div style={{ marginLeft: "auto" }}>
         <button className="cielab-export-btn" onClick={() => exportRef.current && exportRef.current()} title="Exporter PNG">
           <Download size={12} /> PNG
@@ -1829,7 +1903,7 @@ export default function CIELABExplorer() {
       {tab === "explorer" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 11, padding: 14 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 12 }}>Point ① courant</div>
+            <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 12 }}>Point ❶ courant</div>
             {points.length > 0 ? <>
               <div style={{ height: 60, borderRadius: 7, background: labToHex(points[0].L, points[0].a, points[0].b), marginBottom: 10, border: "0.5px solid rgba(0,0,0,0.07)" }} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5, marginBottom: 10 }}>
@@ -1847,7 +1921,7 @@ export default function CIELABExplorer() {
             </> : <div style={{ textAlign: "center", fontSize: 11, color: "var(--color-text-secondary)", padding: "16px 0" }}>Ajoutez un point depuis Plan a*b*</div>}
           </div>
           <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 11, padding: 14 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 12 }}>Contrôles (point ①)</div>
+            <div style={{ fontSize: 9, fontWeight: 800, color: "var(--color-text-secondary)", letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 12 }}>Contrôles (point ❶)</div>
             {points.length > 0 ? <>
               <Slider label="L*" color="#888" min={0} max={100} step={0.1} value={points[0].L}
                 onChange={v => setPoints(pts => pts.map((p,i) => i===0?{...p,L:Math.round(v*10)/10}:p))} />
