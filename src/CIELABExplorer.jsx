@@ -597,18 +597,10 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
   const panRef = useRef({ a: 0, b: 0 });
   useEffect(() => { panRef.current = pan; }, [pan]);
 
-  // ── Popup / hint state ────────────────────────────────────────────────────
+  // ── Popup / hover hint state ────────────────────────────────────────────────
   const [selectedIdx, setSelectedIdx] = useState(null);   // index of point with open popup
-  const [hint, setHint] = useState(null);                  // { x, y } canvas-pixel position of hint
-  const hintTimer = useRef(null);
+  const [hoverIdx, setHoverIdx] = useState(-1);           // index of point being hovered
   const lastTap = useRef(0);                               // for double-tap detection
-
-  // clear hint after delay
-  useEffect(() => {
-    if (!hint) return;
-    const t = setTimeout(() => setHint(null), 1800);
-    return () => clearTimeout(t);
-  }, [hint]);
 
   // close popup when clicking outside the disc
   const popupRef = useRef(null);
@@ -672,29 +664,20 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
 
     // Double-tap detection for touch
     const now = Date.now();
-    const isDoubleClick = e.type === "dblclick";
     const isDoubleTap = e.changedTouches && (now - lastTap.current < 350);
     lastTap.current = now;
 
     if (hit >= 0) {
       // single click/tap on a point → open popup
       setSelectedIdx(hit);
-      setHint(null);
     } else if (inDisc(px, py)) {
       setSelectedIdx(null);
-      if (isDoubleClick || isDoubleTap) {
-        // double-click/tap → create point
+      if (isDoubleTap) {
+        // double-tap (touch) → create point
         if (points.length >= 8) return;
         const [a, b] = p2l(px, py);
         const [ca, cb] = clampPt(a, b);
         setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
-        setHint(null);
-      } else if (!e.changedTouches) {
-        // single mouse click on empty → show hint (not on touch, handled via doubleTap timeout)
-        setHint({ x: px, y: py });
-      } else {
-        // single touch on empty → show hint
-        setHint({ x: px, y: py });
       }
     } else {
       setSelectedIdx(null);
@@ -710,7 +693,6 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     const [a, b] = p2l(x, y);
     const [ca, cb] = clampPt(a, b);
     setPoints(pts => [...pts, { id: `p${Date.now()}`, L: Lval, a: ca, b: cb, name: "" }]);
-    setHint(null);
   }, [getPos, hitTest, inDisc, p2l, setPoints, points.length, Lval]);
 
   const onContextMenu = useCallback((e) => {
@@ -894,13 +876,14 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
     };
   }, [points, L, zoom, coordMode, exportRef]);
 
-  // Cursor: grab when not hovering a point
+  // Cursor + hover hint
   const [cursor, setCursor] = useState("crosshair");
   const onHover = useCallback((e) => {
     const { x, y } = getPos(e);
     const hit = hitTest(x, y);
     const isPanning = drag.current?.kind === "pan";
-    setCursor(isPanning ? "grabbing" : hit >= 0 ? "grab" : inDisc(x,y) ? "crosshair" : "default");
+    setCursor(isPanning ? "grabbing" : hit >= 0 ? "pointer" : inDisc(x,y) ? "crosshair" : "default");
+    setHoverIdx(hit);
   }, [getPos, hitTest, inDisc]);
 
   return (
@@ -916,24 +899,24 @@ function AbDisc({ L, points, setPoints, zoom, setZoom, showColor, showGrid, Lval
         onDoubleClick={onDblClick}
         onContextMenu={onContextMenu} />
 
-      {/* Hint: "double-cliquer pour créer un point" */}
-      {hint && (() => {
+      {/* Hover hint on point: "Cliquer pour afficher les détails" */}
+      {hoverIdx >= 0 && selectedIdx === null && hoverIdx < points.length && (() => {
+        const pt = points[hoverIdx];
         const el = ovRef.current;
         if (!el) return null;
         const rect = el.getBoundingClientRect();
         const scale = rect.width / SIZE;
-        const hx = hint.x * scale;
-        const hy = hint.y * scale;
+        const { x: cpx, y: cpy } = l2p(pt.a, pt.b);
         return (
           <div style={{
-            position: "absolute", left: hx, top: hy - 32,
+            position: "absolute", left: cpx * scale, top: cpy * scale - 32,
             transform: "translateX(-50%)", pointerEvents: "none",
             background: "rgba(0,0,0,0.7)", color: "#fff",
             fontSize: 10, fontWeight: 600, padding: "4px 10px",
             borderRadius: 6, whiteSpace: "nowrap", zIndex: 20,
             backdropFilter: "blur(4px)",
           }}>
-            Double-cliquer pour créer un point
+            Cliquer pour afficher les détails
           </div>
         );
       })()}
